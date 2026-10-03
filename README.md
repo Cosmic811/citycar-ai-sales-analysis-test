@@ -1,14 +1,14 @@
-# CityCar — AI Sales Analysis Test
+# CityCar — тестовое задание по AI-анализу отдела продаж
 
-Test assignment for the **AI Operator / AI Agent** position.
+Тестовое задание на позицию **AI-оператор / AI-агент**.
 
-## 1. Solution architecture
+## 1. Архитектура решения
 
-I would avoid turning every API call into a separate LLM agent. Data collection and KPI calculation should stay deterministic; agents are useful where interpretation, summarization, and cross-source reasoning are needed.
+Я бы не превращал каждый API-вызов в отдельного LLM-агента. Сбор данных и расчёт KPI лучше оставить детерминированным сервисам, а агентов использовать там, где нужна интерпретация, суммаризация и сопоставление данных из разных источников.
 
 ```mermaid
 flowchart TD
-    A["Manager: Analyze sales for the last 30 days"] --> B[Orchestrator]
+    A["Руководитель: Проанализируй отдел продаж за 30 дней"] --> B[Orchestrator]
     B --> C[amoCRM Connector]
     B --> D[Telephony Connector]
     C --> E["Deals / Tasks / Users / Pipelines"]
@@ -24,41 +24,41 @@ flowchart TD
     L --> N[Sales Analysis Agent]
     M --> N
     N --> O[Report Agent]
-    O --> P[Manager]
+    O --> P[Руководитель]
 ```
 
-### Components
+### Orchestrator
 
-**Orchestrator**
+Получает запрос руководителя, определяет период анализа, запускает необходимые этапы и координирует формирование итогового отчёта. Сам не должен рассчитывать бизнес-метрики.
 
-Receives the manager's request, resolves the period, starts the required data pipelines, waits for results, and coordinates the final report. It should not calculate business metrics itself.
+### amoCRM Connector
 
-**amoCRM Connector**
+Работает через amoCRM API v4 и OAuth 2.0.
 
-Uses amoCRM API v4 with OAuth 2.0 and retrieves:
+Получает:
 
-- deals (`GET /api/v4/leads`);
-- tasks (`GET /api/v4/tasks`);
-- responsible users;
-- pipelines/statuses when required.
+- сделки через `GET /api/v4/leads`;
+- задачи через `GET /api/v4/tasks`;
+- ответственных менеджеров;
+- статусы и воронки, если они нужны для анализа.
 
-For task-quality checks, amoCRM exposes `closest_task_at` on a lead. The Tasks API also exposes `complete_till`, `is_completed`, `entity_id`, and `entity_type`.
+Для быстрой проверки задач у сделки доступно поле `closest_task_at`. Для более детального анализа задач можно использовать отдельный Tasks API, где доступны `complete_till`, `is_completed`, `entity_id` и `entity_type`.
 
-**Telephony Connector**
+### Telephony Connector
 
-The exact implementation depends on the telephony provider. The adapter should normalize provider-specific data into one internal model:
+Реализация зависит от конкретного провайдера телефонии. Коннектор приводит данные к единому внутреннему формату:
 
-- call ID;
-- manager / extension;
-- client phone;
-- direction;
-- started time;
-- duration;
-- recording URL or file.
+- ID звонка;
+- менеджер / внутренний номер;
+- номер клиента;
+- направление звонка;
+- дата и время;
+- длительность;
+- ссылка или файл записи.
 
-Audio files go to S3-compatible object storage; PostgreSQL stores metadata and object references rather than binary recordings.
+Аудиофайлы я бы сохранял в S3-compatible Object Storage, а в PostgreSQL оставлял metadata и ссылки на записи.
 
-### Call processing
+### Обработка звонков
 
 ```text
 Recording
@@ -72,7 +72,7 @@ Call Analysis Agent
 Validated structured result
 ```
 
-Example result:
+Пример результата:
 
 ```json
 {
@@ -85,43 +85,47 @@ Example result:
 }
 ```
 
-I would validate LLM output against a schema rather than relying on free-form text.
+Ответ LLM я бы валидировал по схеме, а не использовал как свободный текст.
 
-### Analytics
+### Аналитика
 
-Deterministic code calculates:
+Детерминированный сервис считает:
 
-- new / won / lost deals;
-- conversion by manager and pipeline stage;
-- deal value;
-- deals without the next task;
-- overdue tasks;
-- call count and duration;
-- response/follow-up metrics.
+- новые / выигранные / проигранные сделки;
+- конверсию по менеджерам и этапам;
+- сумму сделок;
+- сделки без следующей задачи;
+- просроченные задачи;
+- количество и длительность звонков;
+- follow-up / response metrics.
 
-The **Sales Analysis Agent** receives the calculated metrics plus structured call-analysis results and searches for patterns.
+После этого **Sales Analysis Agent** получает уже рассчитанные показатели и структурированный анализ звонков, чтобы искать закономерности и объяснять их.
 
-### Storage
+Например:
+
+> У менеджера высокая активность по звонкам, но значительная часть активных сделок остаётся без следующей задачи. В нескольких звонках был обещан follow-up, которого нет в CRM.
+
+### Хранение
 
 **PostgreSQL**
 
-- normalized CRM snapshot;
-- call metadata;
+- нормализованный snapshot CRM;
+- metadata звонков;
 - transcripts;
-- extracted call features;
-- calculated metrics;
-- generated reports;
-- analysis run metadata.
+- извлечённые признаки звонков;
+- рассчитанные метрики;
+- отчёты;
+- metadata запусков анализа.
 
 **Object Storage**
 
-- call recordings.
+- записи звонков.
 
-If semantic search over historical calls becomes useful, I would add embeddings and `pgvector` for transcript chunks.
+Если понадобится семантический поиск по историческим звонкам, добавил бы embeddings и `pgvector` для transcript chunks.
 
-### Production execution
+### Выполнение в production
 
-For long-running analysis I would use background jobs instead of holding one HTTP request open:
+Для долгого анализа я бы использовал фоновые задачи, а не держал HTTP-запрос открытым:
 
 ```text
 API request
@@ -137,85 +141,87 @@ report ready
 notification / dashboard
 ```
 
-This makes retries, partial failures, rate limits, and observability easier to handle.
+Так проще обрабатывать retries, частичные ошибки, rate limits и observability.
 
 ---
 
-## 2. Automation vs human control
+## 2. Что система делает сама, а что передаёт человеку
 
-### What the system can do automatically
+### Что можно автоматизировать
 
-- fetch and normalize CRM/telephony data;
-- transcribe calls;
-- calculate deterministic KPIs;
-- find deals without tasks or with overdue tasks;
-- classify calls and extract structured signals;
-- detect anomalies;
-- prepare a draft report with evidence.
+Система самостоятельно:
 
-### What should remain human-controlled
+- получает и нормализует данные из CRM и телефонии;
+- транскрибирует звонки;
+- считает KPI;
+- находит сделки без задач и с просроченными задачами;
+- классифицирует звонки и извлекает структурированные признаки;
+- ищет аномалии;
+- формирует черновик отчёта с подтверждающими данными.
 
-- final evaluation of an employee;
-- changes to KPI/processes;
-- disciplinary or HR decisions;
-- disputed low-confidence cases;
-- business-critical actions based only on model interpretation.
+### Что оставил бы человеку
 
-I would not let an LLM automatically close deals, punish an employee, or change important CRM state only because it interpreted a call in a certain way.
+- финальную оценку работы сотрудника;
+- изменение KPI и процессов;
+- кадровые и дисциплинарные решения;
+- спорные кейсы с низкой уверенностью модели;
+- бизнес-критичные действия, основанные только на интерпретации LLM.
 
-### Three main risks
+Я бы не позволял AI автоматически закрывать сделки, менять важные статусы CRM или принимать кадровые решения только на основании анализа звонка.
 
-**1. Incomplete or incorrect source data**
+### Три главных риска
 
-The analysis can be technically correct while the CRM itself is incomplete. I would expose data-completeness indicators in the report.
+**1. Неполные или некорректные исходные данные**
 
-**2. STT / LLM errors**
+CRM может быть заполнена не полностью. Анализ при этом может быть технически корректным, но опираться на плохие данные. Поэтому в отчёте полезно показывать `data completeness`.
 
-Noise, names, numbers, accents, and context can cause transcription or interpretation errors. Important conclusions should contain confidence and references to the underlying transcript/call.
+**2. Ошибки STT / LLM**
 
-**3. Security and privacy**
+Шум, имена, цифры, акценты и контекст могут привести к ошибкам транскрибации или интерпретации. Для важных выводов нужно хранить confidence и ссылку на исходный transcript/звонок.
 
-CRM data and recordings can contain personal and commercially sensitive information. I would use server-side secrets, RBAC, encryption, audit logs, retention rules, and minimum necessary data transfer to external AI providers.
+**3. Безопасность и privacy**
 
----
-
-## 3. amoCRM code example
-
-See [`amo-problem-leads.ts`](./amo-problem-leads.ts).
-
-The example retrieves leads updated in the last 30 days and returns leads where:
-
-- `closest_task_at === null` — no next task;
-- `closest_task_at < now` — the closest task is overdue.
-
-For deeper task-level analysis I would additionally query `/api/v4/tasks`, because the task model exposes `complete_till`, completion state and entity linkage.
+CRM и записи звонков содержат персональные и коммерчески чувствительные данные. Нужны server-side secrets, RBAC, encryption, audit log, правила хранения данных и минимизация передачи информации внешним AI-провайдерам.
 
 ---
 
-## 4. Real AI project
+## 3. Пример кода для amoCRM
+
+Код находится в [`amo-problem-leads.ts`](./amo-problem-leads.ts).
+
+Он получает сделки, обновлённые за последние 30 дней, и возвращает те, где:
+
+- `closest_task_at === null` — следующей задачи нет;
+- `closest_task_at < now` — ближайшая задача просрочена.
+
+Для более глубокого анализа можно дополнительно получать задачи через `/api/v4/tasks`.
+
+---
+
+## 4. Реальный AI-проект
 
 ### AI Chatbot Builder / RAG prototype
 
-**Task**
+**Задача**
 
-Build a system where a user creates an AI bot, uploads documents, and the bot can use those documents as its knowledge source.
+Сделать систему, в которой пользователь создаёт AI-бота, загружает документы, а бот использует эти документы как источник знаний.
 
-**Stack**
+**Стек**
 
-Next.js, React, TypeScript, Supabase/PostgreSQL, `pgvector`, Mistral API, embeddings, document parsing/chunking.
+Next.js, React, TypeScript, Supabase/PostgreSQL, `pgvector`, Mistral API, embeddings, parsing/chunking документов.
 
-**Implemented**
+**Что реализовал**
 
-- authentication;
-- bot creation;
-- TXT/PDF/DOCX upload;
-- document text extraction;
+- авторизацию;
+- создание ботов;
+- загрузку TXT/PDF/DOCX;
+- извлечение текста;
 - chunking;
-- database schema for documents and chunks;
-- vector-storage preparation;
-- embedding integration and retrieval pipeline work.
+- структуру хранения документов и chunks;
+- подготовку vector storage;
+- интеграцию embeddings и retrieval pipeline.
 
-Core pipeline:
+Основной pipeline:
 
 ```text
 Document
@@ -235,60 +241,60 @@ Relevant context
 LLM
 ```
 
-The main result was practical experience with document ingestion, chunk boundaries, embedding storage, retrieval, and separating AI integration from application business logic.
+Главный результат для меня — практическое понимание архитектуры AI-функций: ingestion документов, chunk boundaries, embedding storage, retrieval и отделение AI-интеграции от остальной бизнес-логики.
 
-This is a prototype rather than a finished production SaaS.
+Это прототип, а не завершённый production SaaS.
 
 ---
 
-## 5. What I learned independently during the last six months
+## 5. Чему я самостоятельно научился за последние полгода
 
-I expanded from frontend-only work toward end-to-end product development.
+За последние полгода я заметно расширил стек от frontend-разработки в сторону полноценной разработки продукта.
 
 ### React / TypeScript
 
-Applied more complex async/state patterns:
+Применял более сложные async/state сценарии:
 
 - polling;
 - idempotency;
-- persistence and refresh recovery;
-- optimistic concurrency with `ETag / If-Match`;
-- `412` conflict handling;
-- stale-result protection.
+- persistence и восстановление после refresh;
+- optimistic concurrency через `ETag / If-Match`;
+- обработку `412` conflicts;
+- защиту от stale results.
 
 ### Backend
 
-Learned and used:
+Самостоятельно изучил и применил:
 
 - NestJS;
 - GraphQL;
 - Prisma;
 - PostgreSQL;
-- migrations and seed data.
+- migrations и seed data.
 
 ### Infrastructure
 
-Worked with Docker / Docker Compose, including PostgreSQL health checks and controlled service startup.
+Работал с Docker / Docker Compose, включая PostgreSQL healthcheck и контролируемый порядок запуска сервисов.
 
-### External APIs and analytics
+### External APIs и analytics
 
-Integrated Telegram Bot API, Apify, Supabase, GA4/GTM and server-side tracking.
+Интегрировал Telegram Bot API, Apify, Supabase, GA4/GTM и server-side tracking.
 
 ### AI
 
-Studied and applied embeddings, chunking, vector search, RAG architecture, structured LLM output and AI-assisted development.
+Изучал и применял embeddings, chunking, vector search, RAG architecture, structured LLM output и AI-assisted development.
 
-I use AI tools heavily for decomposition, debugging and review, but validate changes through code reading, type checking, lint/build and manual scenarios.
+AI-инструменты использую для декомпозиции, debugging и review, но проверяю изменения через чтение кода, typecheck, lint/build и ручные сценарии.
 
 ---
 
-## 6. Example of an improvement I proposed and delivered
+## 6. Пример улучшения, которое я предложил и довёл до результата
 
-On a commercial project under NDA I worked on an offers/landing flow.
+На коммерческом проекте под NDA я работал над offers/landing flow.
 
-Instead of relying only on a browser analytics event, I proposed separating **business-critical click tracking** from the client analytics layer.
+Я предложил не ограничиваться только браузерным событием аналитики, а отделить **business-critical click tracking** от client analytics.
 
-The resulting flow:
+Получился flow:
 
 ```text
 CTA click
@@ -304,19 +310,21 @@ HTTP 302 redirect
 target offer
 ```
 
-GA4/GTM remained a separate client-side analytics layer.
+GA4/GTM остались отдельным client-side слоем аналитики.
 
-I implemented the server-side tracking path, unique `click_id`, persistence and redirect flow, and verified the end-to-end behavior. This produced an independent server-side record that could be used for attribution and debugging even when client analytics was incomplete.
+Я реализовал server-side tracking path, генерацию `click_id`, сохранение данных и redirect flow, после чего проверил end-to-end поведение.
+
+В результате появился независимый server-side след клика, который можно использовать для attribution и debugging даже если client analytics отработала неполно.
 
 ---
 
-## Notes on implementation choices
+## Почему я выбрал такой подход
 
-- Metrics are calculated by deterministic code; the LLM explains and correlates them.
-- AI outputs should be structured and schema-validated.
-- Every important AI conclusion should be traceable to source data.
-- Long-running work should be queued and retryable.
-- Credentials and CRM tokens stay server-side.
+- KPI считаются обычным кодом, а LLM объясняет и сопоставляет результаты.
+- AI-ответы должны быть структурированы и валидироваться по схеме.
+- Важные выводы должны быть прослеживаемы до исходных данных.
+- Долгие операции должны выполняться через очередь и поддерживать retries.
+- CRM credentials и tokens должны храниться только server-side.
 
 ## amoCRM references
 
